@@ -1,14 +1,19 @@
 # Real-time notification service
 
-ASP.NET Core SignalR delivers notifications to connected clients; a gRPC endpoint accepts messages from another service. Serilog emits structured logs to the console.
+SignalR sends messages to connected clients. A gRPC endpoint accepts service-to-service messages. JWT authentication binds each SignalR connection to its own user ID; the gRPC endpoint requires an API key. Serilog writes structured logs to the console and optionally a central Seq server.
 
 ## Run
-Requires .NET 8. `dotnet run --project NotificationService.csproj`. HTTP/SignalR listens on localhost:5000, gRPC on localhost:5001 (plaintext HTTP/2 for local development). The contract is in `Protos/notifications.proto`. Connect a SignalR client to `http://localhost:5000/hub`, invoke `Join` with a user ID, and subscribe to `ReceiveNotification`. Use a generated gRPC client or grpcurl with the proto to call `notifications.NotificationGateway/Send`, providing `user_id` and `message`.
-
-Example with grpcurl installed:
+Requires .NET 8 and an identity provider that issues HS256 JWTs. Configure secrets outside source control:
 ```bash
-grpcurl -plaintext -import-path Protos -proto notifications.proto -d '{"userId":"alice","message":"Hello"}' localhost:5001 notifications.NotificationGateway/Send
+export Jwt__Key="replace-with-a-random-secret-of-at-least-32-bytes"
+export Grpc__ApiKey="replace-with-another-random-secret-at-least-32-bytes"
+# Optional: export Seq__Url="http://localhost:5341"
+# Optional: export Seq__ApiKey="your-seq-api-key"
+dotnet run --project NotificationService.csproj
 ```
+The trusted issuer must issue a JWT with `sub` equal to the user ID, issuer `NotificationIssuer`, audience `NotificationClients`, a valid expiry and HS256 signature using `Jwt__Key`. Override issuer and audience using `Jwt__Issuer` and `Jwt__Audience`. A SignalR client connects to `http://localhost:5000/hub` using its JWT as bearer token or SignalR access token. It receives `ReceiveNotification`; groups are assigned from its validated identity.
 
-## Limitations
-Demo only: no authentication or authorization is implemented. Any client can join any group and any gRPC caller can send messages; do not expose this service publicly. Add TLS, authenticated identity and service credentials before real use. Delivery is ephemeral and only reaches currently connected clients; there is no persistence, retry, backplane, or central log collector. Console logs can be collected by a platform, but are not themselves a centralized logging deployment.
+Call `notifications.NotificationGateway/Send` on port 5001 with the `x-api-key` gRPC metadata header and the `user_id` and `message` fields. See `Protos/notifications.proto`. The response confirms dispatch, not receipt by a client.
+
+## Deployment limitations
+HTTP and gRPC are plaintext for local development. Put both behind TLS before sending tokens or keys over a network. Configure a separately deployed Seq server to centralize logs; without `Seq__Url` logs go only to the console. Delivery is ephemeral: offline users receive nothing and a multi-instance deployment needs a SignalR backplane or managed service. Add persistence, retries and key rotation to meet your deployment requirements. Never commit secrets.
