@@ -1,0 +1,6 @@
+syntax = "proto3";
+option csharp_namespace = "NotificationService.Grpc";
+package notifications;
+service NotificationGateway { rpc Send (NotificationRequest) returns (NotificationReply); }
+message NotificationRequest { string user_id = 1; string message = 2; }
+message NotificationReply { bool accepted = 1; }
